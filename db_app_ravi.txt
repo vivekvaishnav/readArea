@@ -1,0 +1,440 @@
+import streamlit as st
+import openai
+import numpy as np
+import warnings
+import matplotlib.pyplot as plt
+import plotly.express as px
+warnings.filterwarnings('ignore')
+import streamlit.components.v1 as components
+from streamlit_option_menu import option_menu
+from langchain.agents import Tool,Agent
+from langchain.chat_models import ChatOpenAI 
+import os,re,json
+from langchain.document_loaders import UnstructuredURLLoader
+from langchain.chains.summarize import load_summarize_chain
+from langchain.llms import OpenAI
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+import pandas as pd
+from streamlit_chat import message
+from langchain.memory import ConversationBufferMemory
+from rfp import *
+from main import *
+from database import get_sql_query,Fedex_insights
+
+
+st.set_page_config(layout='wide')
+
+about_details="""Welcome to GenSemantics, your ultimate companion for data-driven decision making! This cutting-edge mobile application harnesses the power of Generative Artificial Intelligence to provide you with unparalleled insights, predictions, and recommendations that will transform the way you navigate Enterprise Knowledge."""
+
+streamlit_style = """
+			<style>
+			@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@100&display=swap');
+
+			html, body, [class*="css"]  {
+			font-family: 'Source Sans Pro', sans-serif;
+			}
+			</style>
+			"""
+st.markdown(streamlit_style, unsafe_allow_html=True)
+
+def make_grid(cols,rows):
+    grid = [0]*cols
+    for i in range(cols):
+        with st.container():
+            grid[i] = st.columns(rows)
+    return grid
+
+html_temp = """
+    <div style="background-color:tomato;padding:3px">
+    <h2 style="color:white;text-align:center;padding:3px">GenSemantics</h2>
+    <h4 style="color:white;text-align:center;padding:3px">Empowering Decision Making with Generative AI</h4>
+    </div>
+    """
+st.markdown(html_temp,unsafe_allow_html=True)
+
+
+# col1, col2, col3 = st.columns(3)
+
+def restart(): 
+    st.session_state.page = 0
+
+if 'col_name_list' not in st.session_state:
+    st.session_state.col_name_list = []
+
+if 'file_name' not in st.session_state:
+    st.session_state.file_name = []
+ 
+if 'button_clicked_about_update' not in st.session_state:
+    st.session_state.button_clicked_about_update = False
+
+def about_update():
+    st.session_state.button_clicked_about_update= False
+
+if 'button_clicked_update' not in st.session_state:
+    st.session_state.button_clicked_update = False
+
+def callback_update():
+    st.session_state.button_clicked_update= False
+
+# def about_update():
+#     st.session_state.button_clicked_review_product= True
+#     st.session_state.button_clicked_callcenter_product= False
+
+
+def header(text):
+    st.markdown(f'<p style="background-color:#0066cc;color:#33ff33;font-size:20px;border-radius:2%;">{text}</p>', unsafe_allow_html=True)
+    return None
+
+# customer_options = ['Type of Customer','Existing Customer','New Customer']
+df_keyval=pd.read_csv("keyvalue.csv")       
+
+# About_options = ["Yes","No"]
+Train_options = ['Add', 'Delete']
+Qa_option = []
+with st.sidebar:
+    page = option_menu(
+        menu_title="Index",
+        options = ['About','Training Hub', 'Insights Section']
+    )
+with st.sidebar:
+        #mode = st.selectbox("Choose Mode:", ["Conversational", "Analytics", "Mix"])
+        mode = st.radio("Choose Mode:", ["Analytics", "Classification", "Conversational", "Co-relation", "Chart","Natural Language Query"])
+        st.markdown(
+    """<style>
+div[class*="stRadio"] > label > div[data-testid="stMarkdownContainer"] > p {
+    font-size: 32px;
+}
+
+    </style>
+    """, unsafe_allow_html=True)
+    
+
+#page = st.sidebar.selectbox('Select page',['About', 'Training Hub','Q&A Section']) 
+if page=='About':
+    st.subheader(':blue[About: ]')
+    st.write(about_details)
+    st.subheader(':blue[Do You want to update Keys?:]')
+    about_selected=None
+    about_selected = st.radio('Choose an option:', ('No', 'Yes'))
+    # if st.button('Submit'):
+    if about_selected == "Yes":
+        field_to_update = st.radio('Select the field to update:', df_keyval.columns)
+        new_value = None
+        if field_to_update == 'EMBEDDINGS_API_KEY':
+            new_value = st.text_input('Enter new EMBEDDINGS_API_KEY:')
+        elif field_to_update == 'EMBEDDINGS_BASE':
+            new_value = st.text_input('Enter new EMBEDDINGS_BASE:')
+        elif field_to_update == 'GPT4_BASE':
+            new_value = st.text_input('Enter new GPT4_BASE:')
+        elif field_to_update == 'GPT4_BASE_URL':
+            new_value = st.text_input('Enter new GPT4_BASE_URL:')
+        elif field_to_update == 'GPT4_API_KEY':
+            new_value = st.text_input('Enter new GPT4_API_KEY:')
+        elif field_to_update == 'GPT_DEPLOYMENT_NAME':
+            new_value = st.text_input('Enter new GPT_DEPLOYMENT_NAME:')
+        elif field_to_update == 'GPT_MODEL':
+            new_value = st.text_input('Enter new GPT_MODEL:')
+        # Update the DataFrame
+        if new_value is not None:
+            col1, col2, col3 = st.columns(3)
+            if col2.button(label="Update",on_click=callback_update) or st.session_state.button_clicked_update:
+                df_keyval.loc[0, field_to_update] = new_value 
+                df_keyval.to_csv("keyvalue.csv",index=False) 
+                st.write("Keys Updated Succefully!!",icon="✅")
+
+    if about_selected=="No":
+        st.write("")
+
+if page == 'Knowledge Hub':
+    db = PostgresDB()
+    db.connect()
+    query = "SELECT * FROM Tenant;"
+    ans= db.execute_query(query)
+    tenantlist = [d[1] for d in ans]
+    tenantlist.append("New Tenant")
+    selected_tenant= st.selectbox("Tenant",tenantlist)
+    #st.text_area(selected_tenant, [d[1] for d in ans])
+    #print(selected_tenant)
+    if selected_tenant != "New Tenant":          
+        query = f"SELECT TenantID FROM Tenant where TenantName='{selected_tenant}'"
+        tenant_id =db.execute_query(query)
+
+        #st.write(tenant_id[0][0])
+        #print(tenant_id[0][0])
+        query = f"SELECT AgentName FROM Agent where TenantID='{tenant_id[0][0]}'"
+        ans= db.execute_query(query)
+        #print(ans)
+        agent_list = [d[0] for d in ans]
+        agent_list.append("New Agent")
+        selected_agent=st.selectbox("Agent",agent_list)
+        if(selected_agent != "New Agent"):
+            try:
+                query = f"SELECT AgentID FROM Agent where AgentName='{selected_agent}'"
+                agent_id = db.execute_query(query)
+               #st.write(agent_id[0][0])
+               #query = f"SELECT CollectionName FROM Collection where AgentID='{agent_id[0][0]}'"
+               #ans= db.execute_query(query)
+               #print(ans)
+               #coll_list = [d[0] for d in ans]
+               #coll_list.append("New Collection")
+               #selected_coll=st.selectbox("list of Collection",coll_list)
+               #if(selected_coll == "New Collection"):
+               #    coll_name = st.text_input("Collection Name")
+               #    query = f"SELECT TenantID FROM Tenant where TenantName='{selected_tenant}'"
+               #    tenant_id =db.execute_query(query)
+               #    query = f"SELECT AgentID FROM Agent where AgentName='{selected_agent}'" 
+               #    agent_id = db.execute_query(query)
+                   
+               #    if st.button("Add Collection",key="1c"):
+               #        query = f"INSERT INTO Collection (CollectionName,AgentID,TenantID) VALUES ('{coll_name}','{agent_id[0][0]}','{tenant_id[0][0]}');"
+               #        print({coll_name},{agent_id[0][0]},{tenant_id[0][0]})
+               #        print(query)
+               #        db.execute_query(query)
+               #        st.write("Collection added Succefully!!")
+                       
+                   
+            except:
+                    print("query not executed!!!")
+        else:
+            agent_name = st.text_input("Agent Name")
+            if st.button("Add Agent",key="1"):   
+                query = f"SELECT TenantID FROM Tenant where TenantName='{selected_tenant}'"
+                tenant_id =db.execute_query(query) 
+                #print(tenant_id)       
+                query = f"INSERT INTO Agent (AgentName, TenantID) VALUES ('{agent_name}', '{tenant_id[0][0]}');"
+                db.execute_query(query)
+                st.write("Agent added Succefully!!")
+                #st.button("Add Agent", disabled=True)
+                pass
+           
+    else:
+        tenant_name = st.text_input("Tenant Name")
+        if st.button("Add Tenant",key="0"):
+            query = f"INSERT INTO Tenant (TenantName) VALUES ('{tenant_name}');"
+            db.execute_query(query)
+            st.write("Tenant added Succefully!!")
+            pass
+
+
+if page=='Training Hub':
+
+    db = PostgresDB()
+    db.connect()
+    query = "SELECT * FROM Tenant;"
+    ans= db.execute_query(query)
+    tenantlist = [d[1] for d in ans]
+    tenantlist.append("New Tenant")
+    selected_tenant= st.selectbox("Tenant",tenantlist)
+    #st.text_area(selected_tenant, [d[1] for d in ans])
+    #print(selected_tenant)
+    if selected_tenant != "New Tenant":          
+        query = f"SELECT TenantID FROM Tenant where TenantName='{selected_tenant}'"
+        tenant_id =db.execute_query(query)
+
+        #st.write(tenant_id[0][0])
+        #print(tenant_id[0][0])
+        query = f"SELECT AgentName FROM Agent where TenantID='{tenant_id[0][0]}'"
+        ans= db.execute_query(query)
+        #print(ans)
+        agent_list = [d[0] for d in ans]
+        agent_list.append("New Agent")
+        selected_agent=st.selectbox("Agent",agent_list)
+        if(selected_agent != "New Agent"):
+            try:
+                query = f"SELECT AgentID FROM Agent where AgentName='{selected_agent}'"
+                agent_id = db.execute_query(query)
+               #st.write(agent_id[0][0])
+               #query = f"SELECT CollectionName FROM Collection where AgentID='{agent_id[0][0]}'"
+               #ans= db.execute_query(query)
+               #print(ans)
+               #coll_list = [d[0] for d in ans]
+               #coll_list.append("New Collection")
+               #selected_coll=st.selectbox("list of Collection",coll_list)
+               #if(selected_coll == "New Collection"):
+               #    coll_name = st.text_input("Collection Name")
+               #    query = f"SELECT TenantID FROM Tenant where TenantName='{selected_tenant}'"
+               #    tenant_id =db.execute_query(query)
+               #    query = f"SELECT AgentID FROM Agent where AgentName='{selected_agent}'" 
+               #    agent_id = db.execute_query(query)
+                   
+               #    if st.button("Add Collection",key="1c"):
+               #        query = f"INSERT INTO Collection (CollectionName,AgentID,TenantID) VALUES ('{coll_name}','{agent_id[0][0]}','{tenant_id[0][0]}');"
+               #        print({coll_name},{agent_id[0][0]},{tenant_id[0][0]})
+               #        print(query)
+               #        db.execute_query(query)
+               #        st.write("Collection added Succefully!!")
+                       
+                   
+            except:
+                    print("query not executed!!!")
+        else:
+            agent_name = st.text_input("Agent Name")
+            if st.button("Add Agent",key="1"):   
+                query = f"SELECT TenantID FROM Tenant where TenantName='{selected_tenant}'"
+                tenant_id =db.execute_query(query) 
+                #print(tenant_id)       
+                query = f"INSERT INTO Agent (AgentName, TenantID) VALUES ('{agent_name}', '{tenant_id[0][0]}');"
+                db.execute_query(query)
+                st.write("Agent added Succefully!!")
+                #st.button("Add Agent", disabled=True)
+                pass
+           
+    else:
+        tenant_name = st.text_input("Tenant Name")
+        if st.button("Add Tenant",key="0"):
+            query = f"INSERT INTO Tenant (TenantName) VALUES ('{tenant_name}');"
+            db.execute_query(query)
+            st.write("Tenant added Succefully!!")
+            pass
+
+    #with st.sidebar:
+    #    try:
+    #        st.button('Delete Collection', on_click=delete_collection(f'{agent_id[0][0]}_{tenant_id[0][0]}'))
+    #    except Exception as e:
+    #        print(e)
+
+    if mode == 'Co-relation':
+            st.subheader(':blue[Upload your invoices: ]')
+            invoice_file = st.file_uploader('invoice', accept_multiple_files=True)
+            if invoice_file is not None: 
+                with st.spinner('Please wait while we do the embeddings...'):       
+                    #st.write(create_embeddings(invoice_file, mode,'invoice'))
+                    try:
+                        st.write(create_embeddings(invoice_file, mode,f'{agent_id[0][0]}_{tenant_id[0][0]}',segment='invoice'))
+                    except:
+                        print("not defined")
+
+            st.subheader(':blue[Upload related documents: ]')
+            doc_file = st.file_uploader('doc', accept_multiple_files=True)
+            if doc_file is not None:
+                with st.spinner('Please wait while we do the embeddings...'):        
+                    try:
+                        st.write(create_embeddings(doc_file, mode,f'{agent_id[0][0]}_{tenant_id[0][0]}', segment='contract'))
+                    except:
+                        print("not defeined")
+        
+    elif mode == 'Chart':
+            st.subheader(':blue[Upload your chart: ]')
+            chart_files = st.file_uploader('chart', accept_multiple_files=True)
+            save_folder = "./chart/"
+            if chart_files is not None:
+                for chart_file in chart_files:
+                    file_path = os.path.join(save_folder, chart_file.name)
+                    with open(file_path, "wb") as f:
+                        f.write(chart_file.getbuffer())
+                        st.success("Chart file saved !!")
+        
+    else:
+        st.subheader(':blue[Upload your files: ]')
+        uploaded_file = st.file_uploader('', accept_multiple_files=True)
+            # st.write("Uploaded Successfully !!")
+            
+
+        if uploaded_file is not None: 
+            with st.spinner('Please wait while we do the embeddings...'):        
+                try:
+                   st.write(create_embeddings(uploaded_file, mode,f'{agent_id[0][0]}_{tenant_id[0][0]}'))
+                except:
+                    print("not defined")
+                
+
+if page=='Insights Section':
+    # st.subheader(':blue[Chat with multiple PDFs: ]')
+    db = PostgresDB()
+    db.connect()
+    query = "SELECT * FROM Tenant;"
+    ans= db.execute_query(query)
+    tenantlist = [d[1] for d in ans]
+    selected_tenant= st.selectbox("Tenant",tenantlist)
+    if(selected_tenant):
+        query = f"SELECT TenantID FROM Tenant where TenantName='{selected_tenant}'"
+        tenant_id =db.execute_query(query)
+        #st.write(tenant_id[0][0])
+        #print(tenant_id[0][0])
+        query = f"SELECT AgentName FROM Agent where TenantID='{tenant_id[0][0]}'"
+        ans= db.execute_query(query)
+        agent_list = [d[0] for d in ans]
+        selected_agent=st.selectbox("Agent",agent_list)
+        if(selected_agent):
+            query = f"SELECT AgentID FROM Agent where AgentName='{selected_agent}'"
+            agent_id = db.execute_query(query)
+            #st.write(agent_id[0][0])
+            #query = f"SELECT CollectionName FROM Collection where AgentID='{agent_id[0][0]}'"
+            #ans= db.execute_query(query)
+            #print(ans)
+            #coll_list = [d[0] for d in ans]
+            #selected_coll=st.selectbox("list of Collection",coll_list)
+
+
+    if mode == 'Classification':
+        st.subheader(':blue[Upload your files: ]')
+        with st.form("my-form", clear_on_submit=True):
+            uploaded_file = st.file_uploader('', accept_multiple_files=True)
+            submitted = st.form_submit_button("submit")
+            if uploaded_file is not None:
+                with st.spinner("Please wait while we process your documents..."):
+                    
+                #st.write(create_embeddings(uploaded_file, mode))
+                    try:
+                        col_list = create_embeddings(uploaded_file,mode,f'{agent_id[0][0]}_{tenant_id[0][0]}')
+                    #st.write(col_list)
+                    except:
+                        st.write("Failed to create embeddings")
+                    
+                if col_list:
+                    l = len(col_list)
+                    for col in col_list:
+                        st.session_state.col_name_list.append(col)
+               
+        #st.write(st.session_state.file_name)
+        #st.write(st.session_state.col_name_list)
+        #st.session_state.col_name_list = ['ICF000', 'samplecasereportform']
+                    classification(l)
+                st.write(st.session_state.col_name_list)
+
+    elif mode == 'Invoice':
+
+        user_question = st.chat_input("Put your question here...")
+        if user_question:
+            st.write(invoice(user_question, mode,f'{agent_id[0][0]}_{tenant_id[0][0]}'))
+    
+    elif mode == "Chart":
+        file_list = os.listdir('./chart/')
+        selected_file = st.selectbox("Select a file:", file_list)
+        if selected_file:
+            # st.info("File selected. Enter your question:")
+            user_question = st.text_input("Question:")
+            if st.button("Submit"):
+                if user_question:
+                    with st.spinner("Please wait while we answer your question..."):
+                        result=extract_img_output('./chart/'+selected_file,user_question)
+                        st.success(result) 
+    
+    elif mode == "Natural Language Query":
+        input_string = st.text_input("User Input")
+        if input_string:
+            with st.spinner("Please wait while we answer your question..."):
+                sql_query=get_sql_query(input_string)
+                data = Fedex_insights(sql_query=sql_query)
+                dict_var= json.loads(Fedex_insights(sql_query=sql_query))
+                data_var= json.loads(json.dumps(dict_var['result']))
+                df = pd.DataFrame(data_var)
+                st.write("Result")
+                st.write(df)
+                st.write("Diagnostics")
+                st.write(sql_query)
+                #st.write(data)
+
+
+
+    else:
+        user_question = st.chat_input("Put your question here..")
+        if user_question:
+            st.write(handle_userinput(user_question, mode,f'{agent_id[0][0]}_{tenant_id[0][0]}'))
+    
+
+
+
+        

@@ -1,0 +1,100 @@
+from langchain.chat_models import AzureChatOpenAI
+from langchain.chains import SequentialChain
+from langchain.agents import tool
+from langchain import PromptTemplate
+from langchain.agents import load_tools
+from langchain.agents import initialize_agent
+from langchain import LLMChain
+import os
+from dotenv import load_dotenv
+import pandas as pd
+import urllib.request, json
+import requests
+load_dotenv()
+
+os.environ['OPENAI_API_TYPE'] = "azure"
+os.environ['OPENAI_API_KEY'] = os.getenv("EMBEDDINGS_API_KEY")
+os.environ['OPENAI_API_BASE'] = os.getenv("EMBEDDINGS_BASE")
+os.environ['OPENAI_API_VERSION'] = "2023-05-15" 
+os.environ['DEPLOYMENT_NAME'] = "add-002"
+
+llm = AzureChatOpenAI(deployment_name="gpt4rfp",
+                      model_name="gpt-4",
+                      openai_api_base=os.getenv("GPT4_BASE"),
+                      openai_api_version="2023-05-15" ,
+                      openai_api_key=os.getenv("GPT4_API_KEY"),
+                      temperature=0)
+
+db_template ="""
+You are an expert data engineer. You need to convert natural language {input_string} to SQL query
+and return the sql query from the below table and columns. The query has to run in microsoft sql server
+warehouse
+
+Table to use : claims
+
+columns of the claims table with the data type of each columns 
+
+customer_Id varchar(20)
+claim_No varchar(20)
+first_name varchar(20)
+last_name	varchar(20)
+clm_amt smallint
+Claim_Date	datetime
+Fraud_trans char(1) ('N' or 'Y')
+"""
+
+def create_chain(template=db_template):
+    try:
+        prompt = PromptTemplate(
+        input_variables=["input_string"],
+        template = template )
+
+        chain1 = LLMChain(
+        llm=llm,
+        prompt=prompt,
+        output_key="solutions")
+
+        overall_chain = SequentialChain(
+        chains=[chain1],
+        input_variables=["input_string"],
+        output_variables=["solutions"],
+        verbose=False)
+        return overall_chain
+    except Exception as e:
+        return e
+    
+
+def get_sql_query(input_string):
+    try:
+        overall_chain=create_chain()
+        input_string=overall_chain.run({"input_string":input_string})
+        return input_string
+    except Exception as e:
+        return e
+    
+
+# input_string="tell me who has equal number of fraud claims and non fraud claims"
+# print(get_sql_query(input_string))
+
+########### Python 3.2 #############
+
+def Fedex_insights(sql_query):
+    try:
+        url = "http://40.122.38.186:8080/genai"
+        #payload = "{\n\"query\":\"SELECT count(*) FROM claims\"\n}"
+        dict_query={}
+        dict_query['query']=sql_query
+        payload = json.dumps(dict_query)
+        #payload = "{\"query\":\"{sql_query}"+}"
+        headers = {
+             'Content-Type': "application/json",
+             'cache-control': "no-cache",
+            'Postman-Token': "3563b830-7c31-44ed-a10d-12fa1aa7d111"
+        }
+
+        response = requests.request("GET", url, data=payload, headers=headers)
+        print(response)
+    except Exception as e:
+        print(e)
+    return(response.text)
+####################################
